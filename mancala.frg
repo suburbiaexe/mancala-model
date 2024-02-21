@@ -102,6 +102,11 @@ pred move[pre: Board,
     (subtract[COLMAX, add[col, 1]] < pre.board[player][col]) implies
         post.well[player] = add[pre.well[player], 1]
     -- if COLMAX - col+1 < num_marbles - 1
+
+    -- if nothing changes on opposing player's side, then you know that the move only
+    -- could've landed in one of your pits or your well -> only need to check 2 cases?
+    -- we also do need to check the case when you land in a pit of yours that's empty, but
+    -- is across from opposing player's pit which has marbles, and we get to capture their marbles
 }
 
 pred doNothing[pre, post: Board] {

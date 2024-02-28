@@ -6,8 +6,8 @@ one sig P1, P2 extends Player {}
 sig Board {
     well: func Player -> Int,
     -- Player's row -> col -> number of marbles in well
-    board: pfunc Player -> Int -> Int
-    turn: Player
+    board: pfunc Player -> Int -> Int,
+    turn: one Player
 }
 
 fun COLMIN: one Int { 0 }
@@ -39,18 +39,11 @@ pred init[b: Board] {
 
 pred winning[b: Board, p, otherP: Player] {
     all col: Int | {
-        (b.board[P1][col] = 0) implies {
-            add[b.board[P2][col], b.well[P2]]
-            b.board[P2][col] = 0
-        }
-
-        (b.board[P2][col] = 0) implies {
-            add[b.board[P1][col], b.well[P1]]
-            b.board[P1][col] = 0
-        }
+        -- all rows are empty
+        b.board[p][col] = 0 and b.board[otherP][col] = 0
+        -- one player has more marbles in their well than the other player
+        b.well[p] > b.well[otherP]
     }
-
-    b.well[p] > b.well[otherP]
 }
 
 pred tied[b: Board, p, otherP: Player] {
@@ -62,6 +55,19 @@ pred tied[b: Board, p, otherP: Player] {
     }
 }
 
+pred addToWell[pre: Board,
+               col: Int,
+               player: Player,
+               post: Board,
+               numToAdd: Int] {
+    subtract[pre.board[player][col], add[subtract[COLMAX, col], 1]] = add[multiply[numToAdd, COLMAX], 1] => {
+        post.well[player] = add[pre.well[player], numToAdd]
+    }
+}
+
+fun overflow[pre: Board, player: Player, col: Int] : one Int {
+    subtract[pre.board[player][col], add[subtract[COLMAX, col], 1]]
+}
 
 pred move[pre: Board,
           col: Int,
@@ -75,7 +81,7 @@ pred move[pre: Board,
     -- must be the player's turn
     -- must have marbles in selected pit
     pre.turn = player
-    b.board[player][col] > 0
+    pre.board[player][col] > 0
     
     -- prevent winning boards from progressing
     not winning[pre, P1, P2] and not winning[pre, P2, P1]
@@ -85,14 +91,104 @@ pred move[pre: Board,
     
     -- set selected pit to contain 0 marbles
     post.board[player][col] = 0
-    -- update the board:
-    -- from col+1 to min(COLMAX - col+1, num_marbles), add a marble to each pit
-    -- if COLMAX - col+1 < num_marbles, do the same for opponent for 0 to num_marbles - (COLMAX - col+1)
-    -- other pits stay the same (number of marbles don't change)
     
-    -- num_marbles - (COLMAX - col+1) - 1 > 0
-    -- num_marbles - (COLMAX - col+1) - 1 - 5 > 0
-    -- num_marbles - (COLMAX - col+1) - 1 - 5 - 6 > 0
+    -- TODO: check case where one player's column is completely empty (win case)
+    
+    -- update the board:    
+    -- n = number of marbles in selected pit (c_s = col)
+    -- c_o = number of columns until player well
+    -- c_o = COLMAX - col
+    -- Case 1: c_o > n => all col_p | col_p - c_s <= n get +1
+    (subtract[COLMAX, col] > pre.board[player][col]) => {
+        all col_p : Int | subtract[col_p, col] <= pre.board[player][col] => {
+            post.board[player][col_p] = add[pre.board[player][col_p], 1]
+        }
+    }
+    
+    -- Case 2: c_o = n - 1 => player well gets +1
+    (subtract[COLMAX, col] = subtract[pre.board[player][col], 1]) => {
+        post.well[player] = add[pre.well[player], 1]
+    }
+    
+    -- Case 3: n - (c_o + 1) > 0 && n - (c_o + 1) <= 2 * MAXCOL
+    --      => all col_o | [n - (c_o + 1)] - col_o >= 1 get +1
+    --      => all col_p | [n - (c_o + 1)] - MAXCOL - col_p >= 1 get +1
+    --          => check which player cols need an extra +1
+    ((overflow[pre, player, col] > 0) and 
+    (overflow[pre, player, col] <= multiply[2, COLMAX])) => {
+        all col_o: Int | {
+            subtract[overflow[pre, player, col], col_o] >= 1 => {
+                post.board[player][col_o] = add[pre.board[player][col_o], 1]
+            }
+
+            -- col_p = MAXCOL - col_o
+            -- player[col_p] = 0 and [n - (c_o + 1)] - MAXCOL - col_p = 1 =>
+            -- post.board[player][col_o] = 0 and update the players' well
+        }
+
+        all col_p: Int | {
+            subtract[subtract[overflow[pre, player, col], COLMAX], col_p] >= 1 => {
+                post.board[player][col_p] = add[pre.board[player][col_p], 1]
+            }
+
+            -- if num seeds in col_p = 0 and [n - (c_o + 1)] - MAXCOL - col_p = 1 =>
+            -- set opponent[col_p] = 0 and update player's well
+            (pre.board[player][col_p] = 0 and subtract[subtract[overflow[pre, player, col], COLMAX], col_p] >= 1)
+        }
+    }
+    
+    -- Case 3.5: n - (c_o + 1) == 2 * MAXCOL + 1 => player well gets +2
+    (overflow[pre, player, col] = add[multiply[2, COLMAX], 1]) => {
+        post.well[player] = add[pre.well[player], 2]
+    }
+    
+    -- Case 4: n - (c_o + 1) > 2 * MAXCOL + 1 && n - (c_o + 1) <= 4 * MAXCOL + 1
+    --      => all col_o | [n - (c_o + 1)] - (2 * MAXCOL + 1) - col_o >= 1 get +2
+    --      => all col_p | [n - (c_o + 1)] - (3 * MAXCOL + 1) - col_p >= 1 get +2
+    ((subtract[pre.board[player][col], add[subtract[COLMAX, col], 1]] > add[multiply[2, COLMAX], 1]) and 
+    (overflow[pre, player, col] <= add[multiply[4, COLMAX], 1])) => {
+        all col_o: Int | {
+            subtract[subtract[overflow[pre, player, col], add[multiply[2, COLMAX], 1]], col_o] >= 1 => {
+                post.board[player][col_o] = add[pre.board[player][col_o], 2]
+            }
+        }
+
+        all col_p: Int | {
+            subtract[subtract[overflow[pre, player, col], add[multiply[3, COLMAX], 1]], col_p] >= 1 => {
+                post.board[player][col_p] = add[pre.board[player][col_p], 2]
+            }
+
+            -- if num seeds in col_p = 0 and [n - (c_o + 1)] - (3 * MAXCOL + 1) - col_p = 1 =>
+            -- steal from opponent's col_p 
+            // (pre.board[player][col_p] = 0 and )
+        }
+    }
+    
+    -- Case 4.5: n - (c_o + 1) == 4 * MAXCOL + 2 => player well gets +3
+    (overflow[pre, player, col] = add[multiply[4, COLMAX], 2]) => {
+        post.well[player] = add[pre.well[player], 3]
+    }
+    
+    -- Case 5: n - (c_o + 1) > 4 * MAXCOL + 2 && n - (c_o + 1) <= 6 * MAXCOL + 2
+    --      => all col_o | [n - (c_o + 1)] - (4 * MAXCOL + 2) - col_o >= 1 get +3
+    --      => all col_p | [n - (c_o + 1)] - (5 * MAXCOL + 2) - col_p >= 1 get +3
+    ((subtract[pre.board[player][col], add[subtract[COLMAX, col], 1]] > add[multiply[4, COLMAX], 2]) and 
+    (overflow[pre, player, col] <= add[multiply[6, COLMAX], 2])) => {
+        all col_o: Int | {
+            subtract[subtract[overflow[pre, player, col], add[multiply[4, COLMAX], 2]], col_o] >= 1 => {
+                post.board[player][col_o] = add[pre.board[player][col_o], 3]
+            }
+        }
+
+        all col_p: Int | {
+            subtract[subtract[overflow[pre, player, col], add[multiply[5, COLMAX], 2]], col_p] >= 1 => {
+                post.board[player][col_p] = add[pre.board[player][col_p], 3]
+            }
+
+            -- if num seeds in col_p = 0 and [n - (c_o + 1)] - (5 * MAXCOL + 2) - col_p = 1 =>
+            -- steal from opponent's col_p 
+        }
+    }
 
     -- for all cols, if col1 > col and col1 - col <= num_marbles, add 1 marble to col1
     all col1: Int | (col1 > col) and (subtract[col1, col] <= pre.board[player][col]) implies {
@@ -118,3 +214,22 @@ pred doNothing[pre, post: Board] {
         }
     }
 }
+
+one sig Game {
+    first: one Board,
+    next: pfunc Board -> Board
+}
+pred trace {
+    init[Game.first]
+    
+    all b: Board | { some Game.next[b] implies {
+        (some col: Int, p: Player | 
+            move[b, col, p, Game.next[b]])
+        or
+        doNothing[b, Game.next[b]]
+    }}
+}
+run {
+    trace
+    allBoardsWellformed
+} for 10 Board for { next is linear } // arbitrary amnt of turns

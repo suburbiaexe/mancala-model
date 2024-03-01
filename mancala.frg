@@ -63,6 +63,7 @@ fun overflow[pre: Board, player: Player, col: Int] : one Int {
     subtract[pre.board[player][col], add[subtract[COLMAX, col], 1]]
 }
 
+// TODO: we're not currently using this anywhere; can replace some code w this pred
 pred addToWell[pre: Board,
                col: Int,
                player: Player,
@@ -291,7 +292,7 @@ pred move[pre: Board,
     not tied[pre, player, otherPlayer] and not tied[pre, otherPlayer, player]
     
     all col_o, col_p: Int | pre.board[otherPlayer][col_o] = 0 => {
-        // last move
+        -- last move
         post.well[player] = add[pre.board[player][col_p], pre.well[player]]
     } else {
         moveCases[pre, col, player, otherPlayer, post]
@@ -305,6 +306,7 @@ pred doNothing[pre, post: Board] {
 
         all col: Int | {
             pre.board[p][col] = post.board[p][col]
+            pre.board[otherP][col] = post.board[otherP][col]
         }
     }
 }
